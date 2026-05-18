@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """cf-validate: Validate a USF file against the schema.
 
+Reads cf/schemas/usf-schema.json dynamically — validation rules stay in sync
+with the schema automatically.
+
 Usage:
   cf-validate.py <snapshot-id>
   cf-validate.py --file path/to/session.usf.json
@@ -8,80 +11,123 @@ Usage:
 """
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
-
-REQUIRED_TOP = ["version", "source", "snapshot", "file_state", "conversation", "tool_calls", "decisions", "current_intent"]
-
-REQUIRED_SOURCE = ["tool", "model"]
-VALID_TOOLS = ["opencode", "claude-code", "codex", "cursor", "copilot-cli"]
-
-REQUIRED_SNAPSHOT = ["timestamp", "session_id", "duration_minutes", "total_messages", "total_tool_calls"]
-
-REQUIRED_FILE_STATE = ["modified", "created", "deleted", "current_branch", "uncommitted_count"]
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schemas" / "usf-schema.json"
 
 
-def validate(usf, path=""):
+def load_schema():
+    if not SCHEMA_PATH.exists():
+        print(f"Error: schema file not found: {SCHEMA_PATH}", file=sys.stderr)
+        sys.exit(1)
+    return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+def _check_type(value, expected, path, errors):
+    if isinstance(expected, list):
+        if not any(_type_match(value, t) for t in expected):
+            type_names = "/".join(expected)
+            errors.append(f"{path}: expected type {type_names}, got {type(value).__name__}")
+    else:
+        if not _type_match(value, expected):
+            errors.append(f"{path}: expected type {expected}, got {type(value).__name__}")
+
+
+def _type_match(value, type_name):
+    if type_name == "string":
+        return isinstance(value, str)
+    if type_name == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if type_name == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if type_name == "object":
+        return isinstance(value, dict)
+    if type_name == "array":
+        return isinstance(value, list)
+    if type_name == "null":
+        return value is None
+    return True
+
+
+def _validate_enum(value, enum_values, path, errors):
+    if value not in enum_values:
+        errors.append(f"{path}: value '{value}' not in {enum_values}")
+
+
+def _validate_minimum(value, minimum, path, errors):
+    if isinstance(value, (int, float)) and value < minimum:
+        errors.append(f"{path}: value {value} is below minimum {minimum}")
+
+
+def _validate_maximum(value, maximum, path, errors):
+    if isinstance(value, (int, float)) and value > maximum:
+        errors.append(f"{path}: value {value} exceeds maximum {maximum}")
+
+
+def validate(data, schema, path=""):
     errors = []
     warnings = []
 
-    if not isinstance(usf, dict):
+    if not isinstance(data, dict):
         errors.append(f"{path}: root must be an object")
         return errors, warnings
 
-    for field in REQUIRED_TOP:
-        if field not in usf:
+    # Required fields
+    for field in schema.get("required", []):
+        if field not in data:
             errors.append(f"{path}: missing required field '{field}'")
 
-    s = usf.get("source", {})
-    if isinstance(s, dict):
-        for field in REQUIRED_SOURCE:
-            if field not in s:
-                errors.append(f"{path}.source: missing '{field}'")
-        tool = s.get("tool")
-        if tool and tool not in VALID_TOOLS:
-            warnings.append(f"{path}.source.tool: '{tool}' not in standard tool list {VALID_TOOLS}")
-    else:
-        errors.append(f"{path}.source: must be an object")
+    properties = schema.get("properties", {})
 
-    sn = usf.get("snapshot", {})
-    if isinstance(sn, dict):
-        for field in REQUIRED_SNAPSHOT:
-            if field not in sn:
-                errors.append(f"{path}.snapshot: missing '{field}'")
-        ts = sn.get("timestamp", "")
-        if ts and not isinstance(ts, str):
-            errors.append(f"{path}.snapshot.timestamp: must be a string")
-    else:
-        errors.append(f"{path}.snapshot: must be an object")
+    for key, prop_schema in properties.items():
+        if key not in data:
+            continue
+        value = data[key]
+        kpath = f"{path}.{key}" if path else key
 
-    fs = usf.get("file_state", {})
-    if isinstance(fs, dict):
-        for field in REQUIRED_FILE_STATE:
-            if field not in fs:
-                errors.append(f"{path}.file_state: missing '{field}'")
-        for arr_field in ("modified", "created", "deleted"):
-            val = fs.get(arr_field, [])
-            if not isinstance(val, list):
-                errors.append(f"{path}.file_state.{arr_field}: must be an array")
-    else:
-        errors.append(f"{path}.file_state: must be an object")
+        prop_type = prop_schema.get("type")
+        if prop_type:
+            _check_type(value, prop_type, kpath, errors)
 
-    conv = usf.get("conversation", [])
-    if isinstance(conv, list):
-        for i, msg in enumerate(conv):
-            if not isinstance(msg, dict):
-                errors.append(f"{path}.conversation[{i}]: must be an object")
-            elif "role" not in msg or "content" not in msg:
-                errors.append(f"{path}.conversation[{i}]: missing 'role' or 'content'")
-    else:
-        errors.append(f"{path}.conversation: must be an array")
+        if "enum" in prop_schema and isinstance(value, str):
+            _validate_enum(value, prop_schema["enum"], kpath, errors)
 
-    ver = usf.get("version", "")
-    if ver and not isinstance(ver, str):
-        errors.append(f"{path}.version: must be a string")
+        if "minimum" in prop_schema:
+            _validate_minimum(value, prop_schema["minimum"], kpath, errors)
+
+        if "maximum" in prop_schema:
+            _validate_maximum(value, prop_schema["maximum"], kpath, errors)
+
+        # Recurse into objects
+        if isinstance(value, dict) and "properties" in prop_schema:
+            sub_errors, sub_warnings = validate(value, prop_schema, kpath)
+            errors.extend(sub_errors)
+            warnings.extend(sub_warnings)
+
+        # Recurse into arrays with items schema
+        if isinstance(value, list) and "items" in prop_schema:
+            items_schema = prop_schema["items"]
+            if isinstance(items_schema, dict):
+                for i, item in enumerate(value):
+                    ipath = f"{kpath}[{i}]"
+                    if isinstance(items_schema.get("type"), str) and items_schema["type"] == "object":
+                        if not isinstance(item, dict):
+                            errors.append(f"{ipath}: must be an object")
+                        else:
+                            # Check required fields in items
+                            for req in items_schema.get("required", []):
+                                if req not in item:
+                                    errors.append(f"{ipath}: missing '{req}'")
+                            for ik, ischema in items_schema.get("properties", {}).items():
+                                if ik in item:
+                                    ival = item[ik]
+                                    if "enum" in ischema and isinstance(ival, str):
+                                        _validate_enum(ival, ischema["enum"], f"{ipath}.{ik}", errors)
+
+        # Non-standard tool name in source.tool → warning
+        if key == "tool" and "enum" in prop_schema and isinstance(value, str) and value not in prop_schema["enum"]:
+            warnings.append(f"{kpath}: '{value}' not in standard tool list {prop_schema['enum']}")
 
     return errors, warnings
 
@@ -127,9 +173,11 @@ def main():
         print(f"Error: invalid JSON in {usf_path}: {e}", file=sys.stderr)
         sys.exit(1)
 
-    errors, warnings = validate(usf)
+    schema = load_schema()
+    errors, warnings = validate(usf, schema)
 
     print(f"Validating: {usf_path}")
+    print(f"  Schema: {SCHEMA_PATH}")
     print(f"  Version: {usf.get('version', 'N/A')}")
     print(f"  Tool: {usf.get('source', {}).get('tool', 'N/A')}")
     print(f"  Session: {usf.get('snapshot', {}).get('session_id', 'N/A')[:16]}")
@@ -138,16 +186,16 @@ def main():
     if errors:
         for e in errors:
             print(f"  ERROR: {e}")
-        print(f"\n  FAILED \u2014 {len(errors)} error(s)")
+        print(f"\n  FAILED — {len(errors)} error(s)")
     else:
-        print("  \u2713 All required fields present")
+        print("  All required fields present, types valid")
 
     if warnings:
         for w in warnings:
             print(f"  WARNING: {w}")
 
     if not errors:
-        print("\n  \u2713 Valid")
+        print("\n  Valid")
 
 
 if __name__ == "__main__":

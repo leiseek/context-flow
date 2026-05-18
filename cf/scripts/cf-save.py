@@ -29,6 +29,28 @@ def _home():
 
 RETENTION_DAYS = 30
 
+# Truncation limits — keep USF manageable for context windows
+MAX_MESSAGE_CHARS = 2000       # Single message content length
+MAX_SNAPSHOT_ID = 32           # Snapshot directory name segment
+MAX_SAFE_LABEL = 32            # User-provided label length
+MAX_MODIFIED_FILES = 50        # Files listed in file_state.modified
+MAX_CREATED_FILES = 20         # Files listed in file_state.created
+MAX_DELETED_FILES = 20         # Files listed in file_state.deleted
+MAX_DECISIONS = 20             # Decision entries extracted
+MAX_CONVERSATION = 100         # Recent messages kept
+MAX_DIFF_CHARS = 2000          # Diff content per modified file
+MAX_INTENT_TASK = 200          # Current intent task description
+MAX_INTENT_EXCERPT = 100       # In-progress intent excerpt
+MAX_TOPIC_CHARS = 80           # Decision topic text
+MAX_SUMMARY_MSGS = 10          # Messages used for summary generation
+MAX_DECISION_PATTERNS = 10     # Decisions shown in summary
+MAX_SUMMARY_FILES = 10         # Modified files shown in summary
+MAX_SUMMARY_CREATED = 5        # Created files shown in summary
+MAX_INTENT_COMPLETED = 5       # Completed items in current_intent
+MAX_SUMMARY_INTENT = 5         # Intent items shown in summary
+MAX_SESSION_DISPLAY = 20       # Session ID chars in summary/print output
+MAX_OPENCODE_SESSION_ID = 16   # OpenCode session ID segment length
+
 
 TOOL_PROJECT_MARKERS = {
     "OPENCODE": [".opencode.json", ".opencode.jsonc"],
@@ -58,9 +80,17 @@ TOOL_NAMES = {
 
 
 SENSITIVE_PATTERNS = [
-    re.compile(r"(?i)(api[_-]?key|secret|token|password|private[_-]?key|passwd)[=: ].{4,120}"),
+    # Key/secret assignment patterns: api_key=..., token: "...", password ...
+    re.compile(r"(?i)(api[_-]?key|secret|token|password|private[_-]?key|passwd|bearer|credentials?)[=:]\s*['\"]?[A-Za-z0-9_\-+/=]{8,}['\"]?"),
+    # OpenAI-style keys
     re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
-    re.compile(r"\b[A-Za-z0-9_\-]{40,}\b"),
+    # GitHub tokens (ghp_, gho_, ghs_, ghu_, github_pat_)
+    re.compile(r"\b(gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})\b"),
+    # AWS access keys
+    re.compile(r"\b(AKIA[A-Z0-9]{16})\b"),
+    # JWT tokens (two base64 segments separated by dot)
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}"),
+    # PEM private key headers
     re.compile(r"(?i)(-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----)"),
 ]
 
@@ -97,7 +127,7 @@ def get_git_state(project_dir):
         for line in diff.split("\n"):
             parts = line.strip().split("|")
             if parts and parts[0].strip():
-                modified.append({"path": parts[0].strip(), "diff": (diff_full or "")[:2000]})
+                modified.append({"path": parts[0].strip(), "diff": (diff_full or "")[:MAX_DIFF_CHARS]})
 
     created, deleted = [], []
     if status_output:
@@ -115,14 +145,14 @@ def get_git_state(project_dir):
     return {
         "branch": branch,
         "uncommitted": uncommitted,
-        "modified": modified[:50],
-        "created": created[:20],
-        "deleted": deleted[:20],
+        "modified": modified[:MAX_MODIFIED_FILES],
+        "created": created[:MAX_CREATED_FILES],
+        "deleted": deleted[:MAX_DELETED_FILES],
     }
 
 
 def get_project_hash(project_dir):
-    return hashlib.sha256(str(project_dir).encode()).hexdigest()[:32]
+    return hashlib.sha256(str(project_dir).encode()).hexdigest()[:MAX_SNAPSHOT_ID]
 
 
 def detect_tool(project_dir):
@@ -140,20 +170,20 @@ def detect_tool(project_dir):
 
 def build_usf(tool, session_id, conversation, tool_calls, git):
     now = datetime.now(timezone.utc).isoformat()
-    conv_text = " ".join(c["content"] for c in conversation[-10:])
+    conv_text = " ".join(c["content"] for c in conversation[-MAX_SUMMARY_MSGS:])
 
     decisions = []
     kw_patterns = [r"(?:I\s+(?:decided|chose|selected|picked|went with|abandoned|rejected|preferred)\s+[^.!?]+)"]
     for pat in kw_patterns:
         for m in re.finditer(pat, conv_text, re.IGNORECASE):
-            topic = m.group()[:80]
-            decisions.append({"topic": topic, "chosen": m.group()[:80], "rejected": [], "reasoning": ""})
+            topic = m.group()[:MAX_TOPIC_CHARS]
+            decisions.append({"topic": topic, "chosen": m.group()[:MAX_TOPIC_CHARS], "rejected": [], "reasoning": ""})
 
     last_msgs = [c["content"] for c in conversation[-4:] if c["role"] == "user"]
     intent = {
-        "task": last_msgs[-1][:200] if last_msgs else None,
-        "completed": [m["path"] for m in (git["modified"] or [])[:5]],
-        "in_progress": [last_msgs[-1][:100]] if last_msgs else [],
+        "task": last_msgs[-1][:MAX_INTENT_TASK] if last_msgs else None,
+        "completed": [m["path"] for m in (git["modified"] or [])[:MAX_INTENT_COMPLETED]],
+        "in_progress": [last_msgs[-1][:MAX_INTENT_EXCERPT]] if last_msgs else [],
         "next_steps": [],
         "blockers": [],
         "confidence": 0.5,
@@ -178,15 +208,15 @@ def build_usf(tool, session_id, conversation, tool_calls, git):
         },
         "file_state": {
             "modified": [{"path": p, "diff": git["modified"][0]["diff"] if git["modified"] else None}
-                         for p in [m["path"] for m in git["modified"][:50]]],
-            "created": git["created"][:20],
-            "deleted": git["deleted"][:20],
+                         for p in [m["path"] for m in git["modified"][:MAX_MODIFIED_FILES]]],
+            "created": git["created"][:MAX_CREATED_FILES],
+            "deleted": git["deleted"][:MAX_DELETED_FILES],
             "current_branch": git["branch"],
             "uncommitted_count": git["uncommitted"],
         },
-        "conversation": conversation[-100:],
+        "conversation": conversation[-MAX_CONVERSATION:],
         "tool_calls": {"compatible": compatible, "incompatible": incompatible},
-        "decisions": decisions[:20],
+        "decisions": decisions[:MAX_DECISIONS],
         "current_intent": intent,
     }
 
@@ -200,7 +230,7 @@ def generate_summary(usf):
         "# ContextFlow Session Summary",
         "",
         f"**Source Tool:** {s['tool']}",
-        f"**Session:** {sn['session_id'][:20]}",
+        f"**Session:** {sn['session_id'][:MAX_SESSION_DISPLAY]}",
         f"**Timestamp:** {sn['timestamp']}",
         f"**Messages:** {sn['total_messages']}",
         f"**Tool Calls:** {sn['total_tool_calls']}",
@@ -211,26 +241,26 @@ def generate_summary(usf):
         lines.append(f"- Branch: `{fs['current_branch']}`")
         lines.append(f"- Uncommitted: {fs['uncommitted_count']}")
         if fs.get("modified"):
-            paths = ", ".join(m["path"] for m in fs["modified"][:10])
+            paths = ", ".join(m["path"] for m in fs["modified"][:MAX_SUMMARY_FILES])
             lines.append(f"- Modified ({len(fs['modified'])}): {paths}")
         if fs.get("created"):
-            paths = ", ".join(c["path"] for c in fs["created"][:5])
+            paths = ", ".join(c["path"] for c in fs["created"][:MAX_SUMMARY_CREATED])
             lines.append(f"- Created ({len(fs['created'])}): {paths}")
         lines.append("")
     if usf.get("decisions"):
         lines.append(f"## Decisions ({len(usf['decisions'])})")
-        for d in usf["decisions"][:10]:
+        for d in usf["decisions"][:MAX_DECISION_PATTERNS]:
             lines.append(f"- **{d['topic']}**: chose `{d['chosen']}`")
         lines.append("")
     if ci.get("task"):
         lines.append("## Current Intent")
         lines.append(f"- Task: {ci['task']}")
         if ci.get("completed"):
-            lines.append(f"- Completed: {', '.join(ci['completed'][:5])}")
+            lines.append(f"- Completed: {', '.join(ci['completed'][:MAX_SUMMARY_INTENT])}")
         if ci.get("in_progress"):
-            lines.append(f"- In Progress: {', '.join(ci['in_progress'][:5])}")
+            lines.append(f"- In Progress: {', '.join(ci['in_progress'][:MAX_SUMMARY_INTENT])}")
         if ci.get("next_steps"):
-            lines.append(f"- Next Steps: {', '.join(ci['next_steps'][:5])}")
+            lines.append(f"- Next Steps: {', '.join(ci['next_steps'][:MAX_SUMMARY_INTENT])}")
     return "\n".join(lines)
 
 
@@ -263,12 +293,15 @@ def extract_open_code(project_dir, session_id=None):
             db_path = c
             break
     if db_path is None:
+        print("  OpenCode DB not found — is OpenCode installed?", file=sys.stderr)
         return None
 
     try:
         tmp = Path(tempfile.gettempdir()) / f"opencode-db-{os.getpid()}.db"
-        shutil.copy2(str(db_path), str(tmp))
+        source_conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn = sqlite3.connect(str(tmp))
+        source_conn.backup(conn)
+        source_conn.close()
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
 
@@ -322,9 +355,9 @@ def extract_open_code(project_dir, session_id=None):
             if not content and "summary" in msg_data:
                 s = msg_data["summary"]
                 if isinstance(s, dict):
-                    content = json.dumps(s)[:2000]
+                    content = json.dumps(s)[:MAX_MESSAGE_CHARS]
             if content:
-                conversation.append({"role": role, "content": redact_text(str(content)[:2000])})
+                conversation.append({"role": role, "content": redact_text(str(content)[:MAX_MESSAGE_CHARS])})
 
         conn.close()
         tmp.unlink()
@@ -332,15 +365,25 @@ def extract_open_code(project_dir, session_id=None):
         raw_model = _parse_model(str(_row_get(target, "model", "unknown")))
 
         git = get_git_state(project_dir)
-        usf = build_usf("opencode", target["id"][:16], conversation, [], git)
+        usf = build_usf("opencode", target["id"][:MAX_OPENCODE_SESSION_ID], conversation, [], git)
         usf["source"]["model"] = raw_model
         return usf
-    except Exception:
+    except sqlite3.OperationalError as e:
+        print(f"  OpenCode DB read error: {e}", file=sys.stderr)
+        return None
+    except PermissionError:
+        print(f"  OpenCode DB permission denied: {db_path}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"  OpenCode extraction failed: {type(e).__name__}: {e}", file=sys.stderr)
         return None
 
 
 def extract_claude_code(project_dir, session_id=None):
     base = _home() / ".claude" / "projects"
+    if not base.exists():
+        print("  Claude Code sessions directory not found", file=sys.stderr)
+        return None
     proj_hash = get_project_hash(project_dir)
     session_dir = base / proj_hash
     if not session_dir.exists():
@@ -349,10 +392,12 @@ def extract_claude_code(project_dir, session_id=None):
                 session_dir = d
                 break
     if not session_dir.exists():
+        print(f"  No Claude Code session directory for this project", file=sys.stderr)
         return None
 
     sessions = sorted(session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not sessions:
+        print(f"  No JSONL sessions found in {session_dir}", file=sys.stderr)
         return None
 
     target = None
@@ -377,9 +422,9 @@ def extract_claude_code(project_dir, session_id=None):
             continue
         etype = entry.get("type", "")
         if etype == "user":
-            conversation.append({"role": "user", "content": (entry.get("message") or entry.get("text", ""))[:2000]})
+            conversation.append({"role": "user", "content": (entry.get("message") or entry.get("text", ""))[:MAX_MESSAGE_CHARS]})
         elif etype == "assistant":
-            conversation.append({"role": "assistant", "content": (entry.get("message") or entry.get("text", ""))[:2000]})
+            conversation.append({"role": "assistant", "content": (entry.get("message") or entry.get("text", ""))[:MAX_MESSAGE_CHARS]})
         elif etype == "tool_use":
             tool_calls.append({"tool": entry.get("tool", entry.get("name", "unknown")), "args": entry.get("input", {})})
 
@@ -390,9 +435,11 @@ def extract_claude_code(project_dir, session_id=None):
 def extract_codex(project_dir, session_id=None):
     base = _home() / ".codex" / "sessions"
     if not base.exists():
+        print("  Codex sessions directory not found — is Codex installed?", file=sys.stderr)
         return None
     files = sorted(base.rglob("rollout-*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not files:
+        print(f"  No rollout JSONL files found in {base}", file=sys.stderr)
         return None
     target = None
     if session_id:
@@ -417,9 +464,9 @@ def extract_codex(project_dir, session_id=None):
         role = entry.get("role", "")
         msg = entry.get("message", "") or entry.get("text", "")
         if role == "user":
-            conversation.append({"role": "user", "content": msg[:2000]})
+            conversation.append({"role": "user", "content": msg[:MAX_MESSAGE_CHARS]})
         elif role == "assistant":
-            conversation.append({"role": "assistant", "content": msg[:2000]})
+            conversation.append({"role": "assistant", "content": msg[:MAX_MESSAGE_CHARS]})
 
     git = get_git_state(project_dir)
     return build_usf("codex", target.stem, conversation, tool_calls, git)
@@ -428,6 +475,7 @@ def extract_codex(project_dir, session_id=None):
 def extract_cursor(project_dir, session_id=None):
     base = _home() / ".cursor" / "projects"
     if not base.exists():
+        print("  Cursor projects directory not found — is Cursor installed?", file=sys.stderr)
         return None
     transcripts = []
     for d in base.iterdir():
@@ -436,6 +484,7 @@ def extract_cursor(project_dir, session_id=None):
             transcripts.extend(tdir.glob("*.txt"))
     transcripts.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     if not transcripts:
+        print(f"  No agent transcripts found in {base}", file=sys.stderr)
         return None
 
     target = None
@@ -454,9 +503,9 @@ def extract_cursor(project_dir, session_id=None):
         if not line:
             continue
         if line.startswith("User:") or line.startswith("Human:"):
-            conversation.append({"role": "user", "content": line.split(":", 1)[1].strip()[:2000]})
+            conversation.append({"role": "user", "content": line.split(":", 1)[1].strip()[:MAX_MESSAGE_CHARS]})
         elif line.startswith("Assistant:") or line.startswith("AI:"):
-            conversation.append({"role": "assistant", "content": line.split(":", 1)[1].strip()[:2000]})
+            conversation.append({"role": "assistant", "content": line.split(":", 1)[1].strip()[:MAX_MESSAGE_CHARS]})
 
     git = get_git_state(project_dir)
     return build_usf("cursor", target.stem, conversation, [], git)
@@ -465,9 +514,11 @@ def extract_cursor(project_dir, session_id=None):
 def extract_copilot_cli(project_dir, session_id=None):
     base = _home() / ".copilot" / "session-state"
     if not base.exists():
+        print("  Copilot CLI session-state not found — is Copilot CLI installed?", file=sys.stderr)
         return None
     dirs = sorted([d for d in base.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
     if not dirs:
+        print(f"  No session directories found in {base}", file=sys.stderr)
         return None
     target_dir = None
     if session_id:
@@ -480,6 +531,7 @@ def extract_copilot_cli(project_dir, session_id=None):
 
     events_file = target_dir / "events.jsonl"
     if not events_file.exists():
+        print(f"  events.jsonl not found in {target_dir}", file=sys.stderr)
         return None
 
     content = redact_text(events_file.read_text(errors="replace"))
@@ -495,9 +547,9 @@ def extract_copilot_cli(project_dir, session_id=None):
         etype = entry.get("type", "")
         data = entry.get("data", {})
         if etype == "user.message":
-            conversation.append({"role": "user", "content": str(data.get("message", data.get("text", "")))[:2000]})
+            conversation.append({"role": "user", "content": str(data.get("message", data.get("text", "")))[:MAX_MESSAGE_CHARS]})
         elif etype == "assistant.message":
-            conversation.append({"role": "assistant", "content": str(data.get("message", data.get("text", "")))[:2000]})
+            conversation.append({"role": "assistant", "content": str(data.get("message", data.get("text", "")))[:MAX_MESSAGE_CHARS]})
 
     git = get_git_state(project_dir)
     return build_usf("copilot-cli", target_dir.name, conversation, [], git)
@@ -527,6 +579,24 @@ def _cleanup_old_snapshots(bridge_dir, max_days=RETENTION_DAYS):
                 removed += 1
     if removed:
         print(f"  Cleaned up {removed} snapshot(s) older than {max_days} days")
+
+
+def _ensure_gitignore(project_dir, bridge_dir):
+    """Add .session-bridge/ to .gitignore if saving locally inside a git repo."""
+    if str(bridge_dir).startswith(str(_home())):
+        return
+    gitignore = project_dir / ".gitignore"
+    ignore_entry = ".session-bridge/"
+    if gitignore.exists():
+        content = gitignore.read_text(encoding="utf-8")
+        if re.search(r"^\.session-bridge/", content, re.MULTILINE):
+            return
+        content = content.rstrip("\n") + "\n" + ignore_entry + "\n"
+        gitignore.write_text(content, encoding="utf-8")
+        print(f"  Added '{ignore_entry}' to .gitignore")
+    else:
+        gitignore.write_text(ignore_entry + "\n", encoding="utf-8")
+        print(f"  Created .gitignore with '{ignore_entry}'")
 
 
 def main():
@@ -559,9 +629,9 @@ def main():
 
     snapshot_parts = [tool_name]
     if args.label:
-        safe_label = re.sub(r"[^a-zA-Z0-9_-]", "_", args.label)[:32]
+        safe_label = re.sub(r"[^a-zA-Z0-9_-]", "_", args.label)[:MAX_SAFE_LABEL]
         snapshot_parts.append(safe_label)
-    snapshot_parts.append(usf["snapshot"]["session_id"][:32])
+    snapshot_parts.append(usf["snapshot"]["session_id"][:MAX_SNAPSHOT_ID])
     snapshot_name = "-".join(snapshot_parts)
 
     if args.use_global:
@@ -570,6 +640,7 @@ def main():
     else:
         bridge_dir = project_dir / ".session-bridge"
     bridge_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_gitignore(project_dir, bridge_dir)
 
     snapshot_dir = bridge_dir / snapshot_name
     snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -585,11 +656,11 @@ def main():
     print(f"  session.usf.json  ({os.path.getsize(str(usf_path))} bytes)")
     print(f"  session.summary.md ({len(summary)} chars)")
     print(f"  Tool: {tool_name}")
-    print(f"  Session: {usf['snapshot']['session_id'][:20]}")
+    print(f"  Session: {usf['snapshot']['session_id'][:MAX_SESSION_DISPLAY]}")
     print(f"  Messages: {usf['snapshot']['total_messages']}")
     print(f"  Decisions: {len(usf.get('decisions', []))}")
     if usf["current_intent"]["task"]:
-        print(f"  Task: {usf['current_intent']['task'][:80]}")
+        print(f"  Task: {usf['current_intent']['task'][:MAX_TOPIC_CHARS]}")
 
     if not args.no_cleanup:
         _cleanup_old_snapshots(bridge_dir)
