@@ -7,7 +7,7 @@ description: >
   session migration, context transfer, or needing to save/restore conversation state between coding agents.
 license: MIT
 compatibility: >
-  Requires Bash to run Python scripts in cf/scripts/. Requires Read, Glob, Grep to discover
+  Requires Bash to run Python scripts in scripts/. Requires Read, Glob, Grep to discover
   session files on disk. Works on Linux, macOS, and Windows.
 allowed-tools: Bash, Read, Glob, Grep, Edit, Write
 metadata:
@@ -27,7 +27,7 @@ Save and load session context across AI coding tools. Provides five slash comman
 
 ## Save
 
-User says `/cf save`. Execute `cf/scripts/cf-save.py` with Bash.
+User says `/cf save`. Execute `scripts/cf-save.py` with Bash.
 
 **Workflow checklist — track progress:**
 - [ ] Detect current tool
@@ -42,8 +42,8 @@ After the script finishes, read `session.summary.md` and relay key info to the u
 
 No LLM used by the script. Works during rate limits. Direct run:
 ```
-python3 cf/scripts/cf-save.py    # macOS/Linux
-py cf/scripts/cf-save.py         # Windows (Bash or PowerShell)
+python3 scripts/cf-save.py    # macOS/Linux
+py scripts/cf-save.py         # Windows (Bash or PowerShell)
 ```
 
 **Flags:** `--label`, `--session-id`, `--tool`, `--project-dir`, `--global`, `--no-cleanup`
@@ -53,7 +53,7 @@ py cf/scripts/cf-save.py         # Windows (Bash or PowerShell)
 User says `/cf load <snapshot-id>` (or `/cf load latest`).
 
 **Workflow checklist — track progress:**
-- [ ] Execute `cf/scripts/cf-load.py` to read the snapshot
+- [ ] Execute `scripts/cf-load.py` to read the snapshot
 - [ ] Read `session.summary.md` for quick orientation
 - [ ] Analyze USF — reclassify tool calls, summarize decisions, identify next steps
 - [ ] Present findings and continue the work
@@ -66,19 +66,19 @@ User says `/cf load <snapshot-id>` (or `/cf load latest`).
 
 ## Status
 
-User says `/cf status`. Execute `cf/scripts/cf-status.py` with Bash.
+User says `/cf status`. Execute `scripts/cf-status.py` with Bash.
 
 Lists all snapshots in `.session-bridge/` with size, age, tool, and message count.
 
 ## Diff
 
-User says `/cf diff <id1> [<id2>]`. If `<id2>` omitted, compare against latest. Execute `cf/scripts/cf-diff.py` with Bash.
+User says `/cf diff <id1> [<id2>]`. If `<id2>` omitted, compare against latest. Execute `scripts/cf-diff.py` with Bash.
 
 Compares two snapshots at the field level: source metadata, file state, conversation length, decisions, intent.
 
 ## Validate
 
-User says `/cf validate <id>`. Execute `cf/scripts/cf-validate.py` with Bash.
+User says `/cf validate <id>`. Execute `scripts/cf-validate.py` with Bash.
 
 Validates against `schemas/usf-schema.json` dynamically. Reports missing fields, type mismatches, and warnings.
 
@@ -104,24 +104,24 @@ The save script redacts:
 
 ## Installation
 
-Place `cf/` as a symlink or copy into the tool's skills directory.
+Clone the repo and link it into the tool's skills directory.
 
 ### OpenCode
 ```bash
 # Unix
-ln -s "$(pwd)/cf" ~/.config/opencode/skills/cf
+ln -s "$(pwd)/context-flow" ~/.config/opencode/skills/cf
 
 # Windows (Admin PowerShell)
-New-Item -ItemType Junction -Path "$env:USERPROFILE\.config\opencode\skills\cf" -Target "$pwd\cf"
+New-Item -ItemType Junction -Path "$env:USERPROFILE\.config\opencode\skills\cf" -Target "$pwd\context-flow"
 ```
 
 ### Claude Code
 ```bash
-ln -s "$(pwd)/cf" /path/to/project/.claude/skills/cf
+ln -s "$(pwd)/context-flow" /path/to/project/.claude/skills/cf
 ```
 
 ### Any tool
-Copy the `cf/` directory into the tool's configured skills path.
+Copy or link the repo root into the tool's configured skills path.
 
 ## Examples
 

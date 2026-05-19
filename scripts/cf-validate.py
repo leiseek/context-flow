@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """cf-validate: Validate a USF file against the schema.
 
-Reads cf/schemas/usf-schema.json dynamically — validation rules stay in sync
+Reads schemas/usf-schema.json dynamically — validation rules stay in sync
 with the schema automatically.
 
 Usage:

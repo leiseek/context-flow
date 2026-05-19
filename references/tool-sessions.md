@@ -101,7 +101,7 @@ Detailed session file locations and extraction notes for each supported tool.
 
 ## Tool Detection
 
-Detection is handled by `cf/scripts/cf-detect.py` — a standalone module that uses environment variables and process-tree topology. It distinguishes `immediate_agent` (closest agent in parent chain), `root_agent` (topmost agent), `terminal_host` (IDE/terminal), and `sandbox` (CI/containers).
+Detection is handled by `scripts/cf-detect.py` — a standalone module that uses environment variables and process-tree topology. It distinguishes `immediate_agent` (closest agent in parent chain), `root_agent` (topmost agent), `terminal_host` (IDE/terminal), and `sandbox` (CI/containers).
 
 ### Phase 1: cf-detect (env vars + process tree — definitive)
 
