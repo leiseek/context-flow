@@ -8,7 +8,7 @@
 
 <p align="center">
   <b>Save & load AI coding session context across tools.</b><br>
-  <sub>Switch between OpenCode, Claude Code, Codex, Cursor, Copilot CLI — without losing context.</sub>
+  <sub>Switch between OpenCode, Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI — without losing context.</sub>
 </p>
 
 ---
@@ -20,7 +20,7 @@
 **ContextFlow** persists your AI coding session (conversation, file changes, decisions, intent) to disk and restores it in another tool. No more repeating yourself when you hit rate limits, need a cheaper model, or switch to a specialized tool.
 
 ### Supported Tools
-OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI
+OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI · Gemini CLI
 
 ### Commands
 
@@ -69,7 +69,7 @@ Works during rate limits. Secrets are automatically redacted. Full docs at [`cf/
 **ContextFlow** 将会话上下文（对话、文件变更、决策、意图）持久化到磁盘，并在另一个工具中无缝恢复。遇到 API 限流、需要更经济的模型、或切换专业工具时，无需重复描述已做的工作。
 
 ### 支持的工具
-OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI
+OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI · Gemini CLI
 
 ### 命令
 
@@ -118,7 +118,7 @@ ln -s "$(pwd)/cf" /path/to/project/.claude/skills/cf
 **ContextFlow** は、AI コーディングセッションのコンテキスト（会話、ファイル変更、決定、意図）をディスクに保存し、別のツールでシームレスに復元します。レート制限に達したとき、より安価なモデルが必要なとき、または専門ツールに切り替えるときに、同じ説明を繰り返す必要はありません。
 
 ### 対応ツール
-OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI
+OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI · Gemini CLI
 
 ### コマンド
 
@@ -160,7 +160,7 @@ ln -s "$(pwd)/cf" /path/to/project/.claude/skills/cf
 **ContextFlow**는 AI 코딩 세션의 컨텍스트(대화, 파일 변경, 결정, 의도)를 디스크에 저장하고 다른 도구에서 원활히 복원합니다. API 속도 제한에 도달했거나, 더 저렴한 모델이 필요하거나, 전문 도구로 전환할 때 작업 내용을 다시 설명할 필요가 없습니다.
 
 ### 지원 도구
-OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI
+OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI · Gemini CLI
 
 ### 명령어
 
@@ -202,7 +202,7 @@ ln -s "$(pwd)/cf" /path/to/project/.claude/skills/cf
 **ContextFlow** guarda el contexto de tu sesión de codificación con IA (conversación, cambios de archivos, decisiones, intenciones) en disco y lo restaura en otra herramienta sin esfuerzo. No más repetirte cuando alcanzas límites de velocidad, necesitas un modelo más barato o cambias a una herramienta especializada.
 
 ### Herramientas compatibles
-OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI
+OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI · Gemini CLI
 
 ### Comandos
 
@@ -244,7 +244,7 @@ Funciona durante límites de velocidad. Secretos redactados automáticamente. Do
 **ContextFlow** persiste le contexte de votre session de codage IA (conversation, modifications de fichiers, décisions, intentions) sur le disque et le restaure dans un autre outil. Fini de vous répéter quand vous atteignez les limites de débit, que vous avez besoin d'un modèle moins cher, ou que vous passez à un outil spécialisé.
 
 ### Outils supportés
-OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI
+OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI · Gemini CLI
 
 ### Commandes
 
@@ -286,7 +286,7 @@ Fonctionne pendant les limites de débit. Les secrets sont automatiquement masqu
 **ContextFlow** speichert den Kontext Ihrer KI-Codierungs-Sitzung (Gespräch, Dateiänderungen, Entscheidungen, Absichten) auf der Festplatte und stellt ihn in einem anderen Tool nahtlos wieder her. Schluss mit Wiederholungen, wenn Sie Rate-Limits erreichen, ein günstigeres Modell benötigen oder zu einem spezialisierten Tool wechseln.
 
 ### Unterstützte Tools
-OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI
+OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI · Gemini CLI
 
 ### Befehle
 
@@ -328,7 +328,7 @@ Funktioniert während Rate-Limits. Geheimnisse werden automatisch geschwärzt. V
 **ContextFlow** сохраняет контекст вашего сеанса ИИ-кодинга (диалог, изменения файлов, решения, намерения) на диск и восстанавливает его в другом инструменте. Больше не нужно повторять всё заново при достижении лимитов, необходимости более дешёвой модели или переходе на специализированный инструмент.
 
 ### Поддерживаемые инструменты
-OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI
+OpenCode · Claude Code · Codex (VS Code) · Cursor · GitHub Copilot CLI · Gemini CLI
 
 ### Команды
 
