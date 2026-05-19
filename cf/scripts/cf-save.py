@@ -10,7 +10,6 @@ Usage:
   cf-save.py --tool claude-code --session-id abc123
 """
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -52,30 +51,23 @@ MAX_SESSION_DISPLAY = 20       # Session ID chars in summary/print output
 MAX_OPENCODE_SESSION_ID = 16   # OpenCode session ID segment length
 
 
-TOOL_PROJECT_MARKERS = {
-    "OPENCODE": [".opencode.json", ".opencode.jsonc"],
-    "CLAUDECODE": ["CLAUDE.md", "CLAUDE.txt"],
-    "CURSOR": [".cursorrules"],
-    "CODEX": [".codex"],
-    "COPILOT_CLI": [".github/copilot-instructions.md", ".github/copilot"],
-}
-
-TOOL_SESSION_PATHS = {
-    "OPENCODE": [_home() / ".local/share/opencode/opencode.db",
-                  _home() / "AppData/Local/opencode/opencode.db"],
-    "CLAUDECODE": [_home() / ".claude/projects"],
-    "CURSOR": [_home() / ".cursor/projects",
-               _home() / ".cursor"],
-    "CODEX": [_home() / ".codex/sessions"],
-    "COPILOT_CLI": [_home() / ".copilot/session-state"],
-}
-
 TOOL_NAMES = {
     "OPENCODE": "opencode",
     "CLAUDECODE": "claude-code",
     "CURSOR": "cursor",
     "CODEX": "codex",
     "COPILOT_CLI": "copilot-cli",
+    "GEMINI_CLI": "gemini-cli",
+}
+
+# Map from cf-detect agent names to internal tool IDs
+AGENT_NAME_TO_ID = {
+    "Claude Code": "CLAUDECODE",
+    "Codex": "CODEX",
+    "OpenCode": "OPENCODE",
+    "GitHub Copilot CLI": "COPILOT_CLI",
+    "Gemini CLI": "GEMINI_CLI",
+    "Cursor": "CURSOR",
 }
 
 
@@ -108,7 +100,7 @@ def redact_text(text):
 def git_cmd(project_dir, *args):
     try:
         r = subprocess.run(["git"] + list(args), capture_output=True, text=True,
-                           cwd=str(project_dir), timeout=5)
+                           cwd=str(project_dir), timeout=5, encoding="utf-8", errors="replace")
         return r.stdout.strip() or None
     except Exception:
         return None
@@ -152,20 +144,144 @@ def get_git_state(project_dir):
 
 
 def get_project_hash(project_dir):
-    return hashlib.sha256(str(project_dir).encode()).hexdigest()[:MAX_SNAPSHOT_ID]
+    """Compute project hash for session directory lookup.
+
+    Claude Code uses path-based encoding (not SHA256): colons, slashes,
+    and backslashes are replaced with dashes. We check both the encoded
+    name and SHA256 prefix to support future changes.
+    """
+    pd_str = str(project_dir)
+    encoded = pd_str.replace(":", "-").replace("/", "-").replace("\\", "-")
+    return encoded
+
+
+def _find_claude_session_dir(project_dir):
+    """Find Claude Code's session directory for a project."""
+    base = _home() / ".claude" / "projects"
+    if not base.exists():
+        return None
+    encoded = get_project_hash(project_dir)
+    # Try exact encoded name first
+    candidate = base / encoded
+    if candidate.exists():
+        return candidate
+    # Fallback: match by partial name (in case of slight encoding differences)
+    for d in base.iterdir():
+        if d.is_dir() and encoded.lower() in d.name.lower():
+            return d
+    return None
+
+
+_cf_detect_module = None
+
+
+def _get_cf_detect():
+    global _cf_detect_module
+    if _cf_detect_module is None:
+        script_dir = Path(__file__).resolve().parent
+        if str(script_dir) not in sys.path:
+            sys.path.insert(0, str(script_dir))
+        import importlib
+        _cf_detect_module = importlib.import_module("cf-detect")
+    return _cf_detect_module
 
 
 def detect_tool(project_dir):
-    pd = Path(project_dir)
-    for tool_id, markers in TOOL_PROJECT_MARKERS.items():
-        for m in markers:
-            if (pd / m).exists():
-                return tool_id
-    for tool_id, paths in TOOL_SESSION_PATHS.items():
-        for p in paths:
-            if p.exists():
-                return tool_id
-    return None
+    """Detect the current tool using cf-detect (env vars + process tree).
+
+    Returns an internal tool ID (e.g. "CLAUDECODE") or None.
+    """
+    cf_detect = _get_cf_detect()
+    result = cf_detect.detect_agent_context(refresh=True)
+
+    # Phase 1: immediate_agent from cf-detect (env vars + process tree)
+    agent = result.immediate_agent or result.root_agent
+    if agent:
+        tool_id = AGENT_NAME_TO_ID.get(agent)
+        if tool_id:
+            print(f"  Detected: {agent} (confidence: {result.confidence})", file=sys.stderr)
+            return tool_id
+
+    # Phase 2: terminal_host — e.g. running inside Cursor's terminal
+    if result.terminal_host:
+        tool_id = AGENT_NAME_TO_ID.get(result.terminal_host)
+        if tool_id:
+            print(f"  Detected terminal: {result.terminal_host}", file=sys.stderr)
+            return tool_id
+
+    # Phase 3: most recently active session file (last resort)
+    best_tool = None
+    best_mtime = 0
+
+    claude_dir = _find_claude_session_dir(Path(project_dir))
+    if claude_dir:
+        for f in claude_dir.glob("*.jsonl"):
+            mtime = f.stat().st_mtime
+            if mtime > best_mtime:
+                best_mtime = mtime
+                best_tool = "CLAUDECODE"
+
+    codex_dir = Path.home() / ".codex" / "sessions"
+    if codex_dir.exists():
+        for f in codex_dir.rglob("rollout-*.jsonl"):
+            mtime = f.stat().st_mtime
+            if mtime > best_mtime:
+                best_mtime = mtime
+                best_tool = "CODEX"
+
+    for db_candidate in [Path.home() / ".local/share/opencode/opencode.db",
+                          Path.home() / "AppData/Local/opencode/opencode.db"]:
+        if db_candidate.exists():
+            mtime = db_candidate.stat().st_mtime
+            if mtime > best_mtime:
+                best_mtime = mtime
+                best_tool = "OPENCODE"
+            break
+
+    cursor_dir = Path.home() / ".cursor" / "projects"
+    if cursor_dir.exists():
+        for d in cursor_dir.iterdir():
+            tdir = d / "agent-transcripts"
+            if tdir.exists():
+                for f in tdir.glob("*.txt"):
+                    mtime = f.stat().st_mtime
+                    if mtime > best_mtime:
+                        best_mtime = mtime
+                        best_tool = "CURSOR"
+
+    copilot_dir = Path.home() / ".copilot" / "session-state"
+    if copilot_dir.exists():
+        for d in copilot_dir.iterdir():
+            if d.is_dir():
+                ws = d / "workspace.yaml"
+                if ws.exists():
+                    mtime = ws.stat().st_mtime
+                    if mtime > best_mtime:
+                        best_mtime = mtime
+                        best_tool = "COPILOT_CLI"
+
+    # Gemini CLI: check session files
+    gemini_projects = Path.home() / ".gemini" / "projects.json"
+    if gemini_projects.exists():
+        try:
+            proj_map = json.loads(gemini_projects.read_text(encoding="utf-8")).get("projects", {})
+            pd_str = str(Path(project_dir).resolve()).replace("\\", "/").lower()
+            for proj_dir, slug in proj_map.items():
+                if proj_dir.replace("\\", "/").lower() == pd_str:
+                    chat_dir = Path.home() / ".gemini" / "tmp" / slug / "chats"
+                    if chat_dir.exists():
+                        for f in chat_dir.glob("session-*.json"):
+                            mtime = f.stat().st_mtime
+                            if mtime > best_mtime:
+                                best_mtime = mtime
+                                best_tool = "GEMINI_CLI"
+                    break
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    if best_tool:
+        print(f"  Detected via session mtime: {best_tool}", file=sys.stderr)
+    return best_tool
 
 
 def build_usf(tool, session_id, conversation, tool_calls, git):
@@ -337,8 +453,9 @@ def extract_open_code(project_dir, session_id=None):
             target = sessions[0]
 
         conversation = []
+        tool_calls = []
         msg_rows = c.execute(
-            "SELECT time_created, data FROM message WHERE session_id = ? ORDER BY time_created",
+            "SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created",
             (target["id"],)
         ).fetchall()
         for row in msg_rows:
@@ -347,17 +464,38 @@ def extract_open_code(project_dir, session_id=None):
             except (json.JSONDecodeError, TypeError):
                 continue
             role = msg_data.get("role", "user")
-            content = ""
-            for field in ("text", "content", "message"):
-                val = msg_data.get(field)
-                if val:
-                    content += str(val)
-            if not content and "summary" in msg_data:
-                s = msg_data["summary"]
-                if isinstance(s, dict):
-                    content = json.dumps(s)[:MAX_MESSAGE_CHARS]
-            if content:
-                conversation.append({"role": role, "content": redact_text(str(content)[:MAX_MESSAGE_CHARS])})
+            msg_id = row["id"]
+
+            # OpenCode stores actual content in the `part` table, not in message.data
+            parts = c.execute(
+                "SELECT data FROM part WHERE message_id = ? ORDER BY time_created",
+                (msg_id,)
+            ).fetchall()
+            text_parts = []
+            for part_row in parts:
+                try:
+                    pdata = json.loads(part_row["data"])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                ptype = pdata.get("type", "")
+                if ptype in ("text", "reasoning"):
+                    t = pdata.get("text", "")
+                    if t:
+                        text_parts.append(t)
+                elif ptype == "tool":
+                    state = pdata.get("state", {})
+                    tool_name = pdata.get("tool", "unknown")
+                    tool_input = state.get("input", {})
+                    tool_output = state.get("output", "")
+                    if isinstance(tool_input, dict):
+                        tool_calls.append({"tool": tool_name, "args": tool_input})
+                    # Also capture tool output as context
+                    if tool_output:
+                        text_parts.append(f"[{tool_name}] {tool_output}")
+
+            if text_parts:
+                combined = "\n".join(text_parts)
+                conversation.append({"role": role, "content": redact_text(combined[:MAX_MESSAGE_CHARS])})
 
         conn.close()
         tmp.unlink()
@@ -365,7 +503,7 @@ def extract_open_code(project_dir, session_id=None):
         raw_model = _parse_model(str(_row_get(target, "model", "unknown")))
 
         git = get_git_state(project_dir)
-        usf = build_usf("opencode", target["id"][:MAX_OPENCODE_SESSION_ID], conversation, [], git)
+        usf = build_usf("opencode", target["id"][:MAX_OPENCODE_SESSION_ID], conversation, tool_calls, git)
         usf["source"]["model"] = raw_model
         return usf
     except sqlite3.OperationalError as e:
@@ -384,14 +522,14 @@ def extract_claude_code(project_dir, session_id=None):
     if not base.exists():
         print("  Claude Code sessions directory not found", file=sys.stderr)
         return None
-    proj_hash = get_project_hash(project_dir)
-    session_dir = base / proj_hash
-    if not session_dir.exists():
+    session_dir = _find_claude_session_dir(project_dir)
+    if session_dir is None:
+        # Fallback: most recently modified project directory
         for d in sorted(base.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if d.is_dir():
                 session_dir = d
                 break
-    if not session_dir.exists():
+    if session_dir is None or not session_dir.exists():
         print(f"  No Claude Code session directory for this project", file=sys.stderr)
         return None
 
@@ -421,10 +559,28 @@ def extract_claude_code(project_dir, session_id=None):
         except json.JSONDecodeError:
             continue
         etype = entry.get("type", "")
-        if etype == "user":
-            conversation.append({"role": "user", "content": (entry.get("message") or entry.get("text", ""))[:MAX_MESSAGE_CHARS]})
-        elif etype == "assistant":
-            conversation.append({"role": "assistant", "content": (entry.get("message") or entry.get("text", ""))[:MAX_MESSAGE_CHARS]})
+
+        # Extract text from message field (may be dict with 'content' key, or string)
+        raw_msg = entry.get("message", entry.get("text", ""))
+        if isinstance(raw_msg, dict):
+            msg_text = raw_msg.get("content", "")
+            if isinstance(msg_text, list):
+                # Content blocks: extract text from each
+                parts = []
+                for block in msg_text:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+                    elif isinstance(block, str):
+                        parts.append(block)
+                msg_text = "\n".join(parts)
+            msg_text = str(msg_text)
+        else:
+            msg_text = str(raw_msg) if raw_msg else ""
+
+        if etype == "user" and msg_text:
+            conversation.append({"role": "user", "content": msg_text[:MAX_MESSAGE_CHARS]})
+        elif etype == "assistant" and msg_text:
+            conversation.append({"role": "assistant", "content": msg_text[:MAX_MESSAGE_CHARS]})
         elif etype == "tool_use":
             tool_calls.append({"tool": entry.get("tool", entry.get("name", "unknown")), "args": entry.get("input", {})})
 
@@ -529,30 +685,128 @@ def extract_copilot_cli(project_dir, session_id=None):
     if target_dir is None:
         target_dir = dirs[0]
 
-    events_file = target_dir / "events.jsonl"
-    if not events_file.exists():
-        print(f"  events.jsonl not found in {target_dir}", file=sys.stderr)
-        return None
-
-    content = redact_text(events_file.read_text(errors="replace"))
-    conversation = []
-    for line in content.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
+    # Read workspace.yaml for session metadata
+    workspace_file = target_dir / "workspace.yaml"
+    ws_id = target_dir.name
+    if workspace_file.exists():
         try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        etype = entry.get("type", "")
-        data = entry.get("data", {})
-        if etype == "user.message":
-            conversation.append({"role": "user", "content": str(data.get("message", data.get("text", "")))[:MAX_MESSAGE_CHARS]})
-        elif etype == "assistant.message":
-            conversation.append({"role": "assistant", "content": str(data.get("message", data.get("text", "")))[:MAX_MESSAGE_CHARS]})
+            import yaml
+            ws_data = yaml.safe_load(workspace_file.read_text(encoding="utf-8"))
+            ws_id = ws_data.get("id", ws_id)
+        except ImportError:
+            # No PyYAML — parse manually for simple key: value format
+            for line in workspace_file.read_text(encoding="utf-8").split("\n"):
+                if line.startswith("id:"):
+                    ws_id = line.split(":", 1)[1].strip()
+                    break
+        except Exception as e:
+            print(f"  Warning: could not parse workspace.yaml: {e}", file=sys.stderr)
+
+    # Copilot CLI (v1.0+) stores workspace metadata + checkpoints,
+    # but does not persist conversation content.
+    print("  Note: Copilot CLI does not persist conversation text — metadata only", file=sys.stderr)
+
+    # Try reading checkpoints for context
+    conversation = []
+    checkpoints_file = target_dir / "checkpoints" / "index.md"
+    if checkpoints_file.exists():
+        cp_content = checkpoints_file.read_text(encoding="utf-8", errors="replace")
+        if cp_content.strip():
+            conversation.append({"role": "system", "content": redact_text(cp_content[:MAX_MESSAGE_CHARS])})
 
     git = get_git_state(project_dir)
-    return build_usf("copilot-cli", target_dir.name, conversation, [], git)
+    return build_usf("copilot-cli", ws_id, conversation, [], git)
+
+
+def _find_gemini_project_slug(project_dir):
+    """Look up project slug from ~/.gemini/projects.json."""
+    projects_file = _home() / ".gemini" / "projects.json"
+    if not projects_file.exists():
+        return None
+    try:
+        data = json.loads(projects_file.read_text(encoding="utf-8"))
+        proj_map = data.get("projects", {})
+        pd_str = str(Path(project_dir).resolve()).replace("\\", "/").lower()
+        for proj_dir, slug in proj_map.items():
+            if proj_dir.replace("\\", "/").lower() == pd_str:
+                return slug
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def extract_gemini_cli(project_dir, session_id=None):
+    # Find project slug
+    slug = _find_gemini_project_slug(project_dir)
+    if not slug:
+        # Fallback: try all project directories
+        tmp_dir = _home() / ".gemini" / "tmp"
+        if not tmp_dir.exists():
+            print("  Gemini CLI data not found — is Gemini CLI installed?", file=sys.stderr)
+            return None
+        # Use the most recently modified project directory
+        candidates = sorted(
+            [d for d in tmp_dir.iterdir() if d.is_dir()],
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        slug = candidates[0].name if candidates else None
+        if not slug:
+            print("  No Gemini CLI project directories found", file=sys.stderr)
+            return None
+
+    chat_dir = _home() / ".gemini" / "tmp" / slug / "chats"
+    if not chat_dir.exists():
+        print(f"  No Gemini CLI chats directory for project '{slug}'", file=sys.stderr)
+        return None
+
+    sessions = sorted(chat_dir.glob("session-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not sessions:
+        print(f"  No Gemini CLI session files found in {chat_dir}", file=sys.stderr)
+        return None
+
+    target = None
+    if session_id:
+        for s in sessions:
+            if session_id in s.stem:
+                target = s
+                break
+    if target is None:
+        target = sessions[0]
+
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"  Gemini CLI session read error: {e}", file=sys.stderr)
+        return None
+
+    conversation = []
+    tool_calls = []
+    session_id_val = raw.get("sessionId", target.stem)
+
+    for msg in raw.get("messages", []):
+        msg_type = msg.get("type", "")
+        content = msg.get("content", "")
+        if not content:
+            continue
+
+        role = "system"
+        if msg_type == "user":
+            role = "user"
+        elif msg_type in ("assistant", "model"):
+            role = "assistant"
+        elif msg_type == "tool":
+            tool_name = msg.get("tool_name", "unknown")
+            tool_input = msg.get("tool_input", {})
+            tool_calls.append({"tool": tool_name, "args": tool_input})
+            continue
+        elif msg_type not in ("info",):
+            # Unknown type — treat as system
+            pass
+
+        conversation.append({"role": role, "content": redact_text(content[:MAX_MESSAGE_CHARS])})
+
+    git = get_git_state(project_dir)
+    return build_usf("gemini-cli", session_id_val, conversation, tool_calls, git)
 
 
 EXTRACTORS = {
@@ -561,6 +815,7 @@ EXTRACTORS = {
     "CURSOR": extract_cursor,
     "CODEX": extract_codex,
     "COPILOT_CLI": extract_copilot_cli,
+    "GEMINI_CLI": extract_gemini_cli,
 }
 
 
@@ -615,6 +870,11 @@ def main():
     if not tool_id:
         print("Error: Could not detect tool. Run from a project directory.", file=sys.stderr)
         sys.exit(1)
+
+    # Normalize: accept both "claude-code" and "CLAUDECODE" via reverse lookup
+    TOOL_NAME_TO_ID = {v: k for k, v in TOOL_NAMES.items()}
+    if tool_id in TOOL_NAME_TO_ID:
+        tool_id = TOOL_NAME_TO_ID[tool_id]
 
     tool_name = TOOL_NAMES.get(tool_id, tool_id)
     extractor = EXTRACTORS.get(tool_id)

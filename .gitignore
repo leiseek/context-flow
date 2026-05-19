@@ -1,0 +1,12 @@
+.session-bridge/
+__pycache__/
+
+# Agentic tool directories
+.agent/
+.claude/
+.cursor/
+.codex/
+.copilot/
+.gemini/
+.opencode/
+.vscode/

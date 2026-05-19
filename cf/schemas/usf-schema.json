@@ -14,7 +14,7 @@
       "type": "object",
       "required": ["tool", "model"],
       "properties": {
-        "tool": { "type": "string", "enum": ["opencode", "claude-code", "codex", "cursor", "copilot-cli"] },
+        "tool": { "type": "string", "enum": ["opencode", "claude-code", "codex", "cursor", "copilot-cli", "gemini-cli"] },
         "model": { "type": ["string", "null"] }
       }
     },

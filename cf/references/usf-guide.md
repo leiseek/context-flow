@@ -17,7 +17,7 @@ Identifies the origin tool and model.
 { "tool": "opencode", "model": "deepseek-v4-flash-free" }
 ```
 
-- `tool` — one of: `opencode`, `claude-code`, `codex`, `cursor`, `copilot-cli`
+- `tool` — one of: `opencode`, `claude-code`, `codex`, `cursor`, `copilot-cli`, `gemini-cli`
 - `model` — the model name/ID used during the session. May be a JSON string if stored by the tool
 
 ## snapshot
@@ -51,8 +51,10 @@ The `diff` field in each modified entry is truncated to 2000 characters to keep 
 Array of `{ role, content }` pairs. Roles are `user`, `assistant`, `system`, or `tool`.
 
 **Content availability varies by tool:**
-- **Claude Code / Codex / Cursor / Copilot CLI** — Full conversation text is available
-- **OpenCode** — Only assistant summary diffs are persisted; user text is not available
+- **Claude Code / Codex / Cursor** — Full conversation text is available
+- **Gemini CLI** — Full conversation text when sessions are persisted in `~/.gemini/tmp/`
+- **OpenCode** — Conversation reconstructed from the `part` table (text, reasoning, tool types)
+- **Copilot CLI** — No conversation text is persisted; metadata-only extraction from `workspace.yaml`
 
 The save script limits conversation to the last 100 messages and truncates each message to 2000 characters.
 

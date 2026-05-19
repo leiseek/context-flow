@@ -1,7 +1,7 @@
 ---
 name: cf
 description: >
-  Use when switching AI coding tools (Claude Code, Codex, Cursor, OpenCode, Copilot CLI) due to rate limits,
+  Use when switching AI coding tools (Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Gemini CLI) due to rate limits,
   cost optimization, or model capability gaps. Triggers on "/cf save", "/cf load", "/cf status", "/cf diff",
   "/cf validate" commands. Also use when the user mentions losing context, repeating work across tools,
   session migration, context transfer, or needing to save/restore conversation state between coding agents.
