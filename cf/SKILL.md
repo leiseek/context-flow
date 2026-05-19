@@ -41,10 +41,10 @@ User says `/cf save`. Execute `cf/scripts/cf-save.py` with Bash.
 After the script finishes, read `session.summary.md` and relay key info to the user. Then run `/cf validate` to confirm the output is valid — if validation fails, investigate and re-save.
 
 No LLM used by the script. Works during rate limits. Direct run:
-```bash
-python3 cf/scripts/cf-save.py
 ```
-Windows: `py cf\scripts\cf-save.py`
+python3 cf/scripts/cf-save.py    # macOS/Linux
+py cf/scripts/cf-save.py         # Windows (Bash or PowerShell)
+```
 
 **Flags:** `--label`, `--session-id`, `--tool`, `--project-dir`, `--global`, `--no-cleanup`
 

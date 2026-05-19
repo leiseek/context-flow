@@ -93,6 +93,11 @@ def list_snapshots(bridge_dir):
 
 
 def main():
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+        sys.stderr.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(description="List session snapshots")
     parser.add_argument("--project-dir", default=None, help="Project directory")
     parser.add_argument("--global", dest="use_global", action="store_true", help="Use ~/.session-bridge/")

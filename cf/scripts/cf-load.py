@@ -159,6 +159,12 @@ def read_usf(snapshot_dir):
 
 
 def main():
+    # Ensure UTF-8 output on Windows (avoids GBK encoding errors on Chinese locale)
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+        sys.stderr.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(description="Load session context from USF snapshot")
     parser.add_argument("snapshot_id", nargs="?", default="latest", help="Snapshot ID or 'latest'")
     parser.add_argument("--project-dir", default=None, help="Project directory with .session-bridge")

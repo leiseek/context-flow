@@ -55,6 +55,11 @@ def format_summary(usf):
 
 
 def main():
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+        sys.stderr.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(description="Compare two session snapshots")
     parser.add_argument("id1", help="First snapshot ID or path")
     parser.add_argument("id2", nargs="?", help="Second snapshot ID or path (default: latest)")

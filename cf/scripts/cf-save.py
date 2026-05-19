@@ -855,6 +855,11 @@ def _ensure_gitignore(project_dir, bridge_dir):
 
 
 def main():
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+        sys.stderr.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(description="Save session context (no LLM required)")
     parser.add_argument("--label", "-l", default=None, help="Snapshot label")
     parser.add_argument("--session-id", default=None, help="Specific session ID")

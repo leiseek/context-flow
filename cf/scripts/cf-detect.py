@@ -406,6 +406,8 @@ def clear_cache() -> None:
 
 
 if __name__ == "__main__":
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
     ctx = detect_agent_context(refresh=True)
     print(f"primary           : {ctx.primary()}")
     print(f"immediate_agent   : {ctx.immediate_agent or 'Unknown'}")

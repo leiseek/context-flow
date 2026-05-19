@@ -133,6 +133,11 @@ def validate(data, schema, path=""):
 
 
 def main():
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+        sys.stderr.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(description="Validate USF file against schema")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("snapshot_id", nargs="?", help="Snapshot ID in .session-bridge/")
